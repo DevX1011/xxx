@@ -2,15 +2,16 @@ from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_admin import Admin
 from flask_admin.contrib.sqla import ModelView
-from datetime import datetime
-import hashlib
+from datetime import datetime, timedelta
 import os
 
+# === App-Konfiguration
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///licenses.db'
 app.config['SECRET_KEY'] = 'supersecret'
 db = SQLAlchemy(app)
 
+# === Datenbankmodell
 class License(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     schluessel = db.Column(db.String(64), unique=True, nullable=False)
@@ -20,17 +21,18 @@ class License(db.Model):
     aktiv = db.Column(db.Boolean, default=True)
     hwid = db.Column(db.String(128), nullable=True)
 
+# === Admin-Ansicht ohne modale Dialoge
 class LicenseModelView(ModelView):
     form_excluded_columns = ['id', 'erstellt_am']
     column_exclude_list = ['id']
     can_view_details = True
-    # Modal-Funktion deaktiviert wegen WTForms Bug
-    # create_modal = True
-    # edit_modal = True
+    create_modal = False
+    edit_modal = False
 
 admin = Admin(app, name='Lizenzverwaltung', template_mode='bootstrap3')
 admin.add_view(LicenseModelView(License, db.session))
 
+# === API-Endpunkt zur Lizenzprüfung
 @app.route('/api/check_license')
 def check_license():
     key = request.args.get('key')
@@ -39,16 +41,14 @@ def check_license():
     lic = License.query.filter_by(schluessel=key).first()
     if not lic:
         return jsonify({"status": "invalid", "message": "Lizenz nicht gefunden."})
-
     if not lic.aktiv:
         return jsonify({"status": "invalid", "message": "Lizenz deaktiviert."})
-
     if lic.gueltig_bis < datetime.utcnow():
         return jsonify({"status": "invalid", "message": "Lizenz abgelaufen."})
-
     if lic.hwid and lic.hwid != hwid:
-        return jsonify({"status": "invalid", "message": "HWID nicht gültig."})
+        return jsonify({"status": "invalid", "message": "HWID stimmt nicht überein."})
 
+    # HWID registrieren, wenn leer
     if not lic.hwid:
         lic.hwid = hwid
         db.session.commit()
@@ -59,6 +59,7 @@ def check_license():
         "hwid": lic.hwid
     })
 
+# === Initialisieren & Starten
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
