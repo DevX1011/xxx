@@ -20,8 +20,15 @@ class License(db.Model):
     aktiv = db.Column(db.Boolean, default=True)
     hwid = db.Column(db.String(128), nullable=True)
 
+class LicenseModelView(ModelView):
+    form_excluded_columns = ['id', 'erstellt_am']
+    column_exclude_list = ['id']
+    can_view_details = True
+    create_modal = True
+    edit_modal = True
+
 admin = Admin(app, name='Lizenzverwaltung', template_mode='bootstrap3')
-admin.add_view(ModelView(License, db.session))
+admin.add_view(LicenseModelView(License, db.session))
 
 @app.route('/api/check_license')
 def check_license():
