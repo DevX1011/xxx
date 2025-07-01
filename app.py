@@ -1,21 +1,22 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string, redirect
 from flask_sqlalchemy import SQLAlchemy
 from flask_admin import Admin
 from flask_admin.contrib.sqla import ModelView
-from datetime import datetime
-import os
-
-# === App-Konfiguration
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
-load_dotenv()  # liest .env
+import os
+import secrets
+
+load_dotenv()
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'change_me')
+ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
+
 db = SQLAlchemy(app)
 
-# === Datenbankmodell
 class License(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     schluessel = db.Column(db.String(64), unique=True, nullable=False)
@@ -25,7 +26,6 @@ class License(db.Model):
     aktiv = db.Column(db.Boolean, default=True)
     hwid = db.Column(db.String(128), nullable=True)
 
-# === Admin-Ansicht
 class LicenseModelView(ModelView):
     form_excluded_columns = ['id', 'erstellt_am']
     column_exclude_list = ['id']
@@ -36,7 +36,10 @@ class LicenseModelView(ModelView):
 admin = Admin(app, name='Lizenzverwaltung', template_mode='bootstrap3')
 admin.add_view(LicenseModelView(License, db.session))
 
-# === Lizenzprüfungs-API
+@app.route('/')
+def home():
+    return '🔐 Lizenzserver läuft – API erreichbar!', 200
+
 @app.route('/api/check_license')
 def check_license():
     key = request.args.get('key')
@@ -62,53 +65,35 @@ def check_license():
         "hwid": lic.hwid
     })
 
-# === Init & Start
+# Webformular zum Key-Generieren
+HTML_FORM = '''
+<h2>🔑 Lizenz-Key generieren</h2>
+<form method="post">
+  Passwort: <input type="password" name="pw"><br>
+  Laufzeit (Tage): <input type="number" name="days"><br>
+  <button type="submit">Key generieren</button>
+</form>
+<p>{{ message }}</p>
+'''
+
+@app.route('/gen_key', methods=['GET', 'POST'])
+def gen_key():
+    msg = ''
+    if request.method == 'POST':
+        pw = request.form.get('pw')
+        if pw != ADMIN_PASSWORD:
+            msg = "❌ Falsches Passwort"
+        else:
+            days = int(request.form.get('days', '30'))
+            key = secrets.token_hex(16)
+            now = datetime.utcnow()
+            license = License(schluessel=key, laufzeit_tage=days, gueltig_bis=now + timedelta(days=days))
+            db.session.add(license)
+            db.session.commit()
+            msg = f"✅ Lizenz erstellt: <code>{key}</code><br>Gültig bis: {license.gueltig_bis.date()}"
+    return render_template_string(HTML_FORM, message=msg)
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    port = int(os.environ.get('PORT', 5000))
-    app.run(debug=True, host='0.0.0.0', port=port)
-
-@app.route('/')
-def home():
-    return '🔐 Lizenzserver läuft – API erreichbar!', 200
-
-from flask import render_template_string
-
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "test123")  # .env setzen!
-
-html_form = """
-<!doctype html>
-<title>Key Generator</title>
-<h2>🔐 Lizenz-Key erstellen</h2>
-<form method=post>
-  Admin-Passwort: <input type=password name=password><br><br>
-  Laufzeit (Tage): <input type=number name=days value=30><br><br>
-  <input type=submit value="Lizenz erstellen">
-</form>
-{% if result %}
-  <p><strong>✅ Neuer Key:</strong> {{ result }}</p>
-{% endif %}
-"""
-
-@app.route('/generate', methods=['GET', 'POST'])
-def generate_license():
-    result = None
-    if request.method == 'POST':
-        if request.form.get("password") != ADMIN_PASSWORD:
-            return "❌ Falsches Passwort", 403
-        try:
-            days = int(request.form.get("days", 30))
-            key = secrets.token_hex(16)
-            gueltig_bis = datetime.utcnow() + timedelta(days=days)
-            lic = License(
-                schluessel=key,
-                laufzeit_tage=days,
-                gueltig_bis=gueltig_bis
-            )
-            db.session.add(lic)
-            db.session.commit()
-            result = key
-        except Exception as e:
-            return f"Fehler: {str(e)}", 500
-    return render_template_string(html_form, result=result)
+    app.run(debug=True, host='0.0.0.0')
