@@ -7,7 +7,7 @@ import os
 
 # === App-Konfiguration
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///licenses.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://license_db_w975_user:eTkM91MxrmhIUg2TksJSucdDKRi5yjdK@dpg-d1i20gbuibrs73cjbocg-a.oregon-postgres.render.com/license_db_w975'
 app.config['SECRET_KEY'] = 'supersecret'
 db = SQLAlchemy(app)
 
@@ -21,7 +21,7 @@ class License(db.Model):
     aktiv = db.Column(db.Boolean, default=True)
     hwid = db.Column(db.String(128), nullable=True)
 
-# === Admin-Ansicht ohne modale Dialoge
+# === Admin-Ansicht
 class LicenseModelView(ModelView):
     form_excluded_columns = ['id', 'erstellt_am']
     column_exclude_list = ['id']
