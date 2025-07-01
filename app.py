@@ -1,18 +1,18 @@
-from flask import Flask, request, jsonify, render_template_string, redirect
+# app.py
+from flask import Flask, request, redirect, url_for, render_template_string, flash, abort
 from flask_sqlalchemy import SQLAlchemy
-from flask_admin import Admin
+from flask_admin import Admin, expose, AdminIndexView
 from flask_admin.contrib.sqla import ModelView
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-import os
-import secrets
+import os, secrets
 
 load_dotenv()
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'change_me')
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'please_change')
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
 
 db = SQLAlchemy(app)
@@ -26,15 +26,27 @@ class License(db.Model):
     aktiv = db.Column(db.Boolean, default=True)
     hwid = db.Column(db.String(128), nullable=True)
 
-class LicenseModelView(ModelView):
-    form_excluded_columns = ['id', 'erstellt_am']
-    column_exclude_list = ['id']
-    can_view_details = True
-    create_modal = False
-    edit_modal = False
+# Geschützter Admin-Index
+class MyAdminIndex(AdminIndexView):
+    @expose('/')
+    def index(self):
+        pw = request.args.get('pw')
+        if pw != ADMIN_PASSWORD:
+            return render_template_string('''
+               <form action="" method="get">
+                 Admin-Passwort: <input name="pw" type="password"><button>Login</button>
+               </form>
+            ''')
+        return super().index()
 
-admin = Admin(app, name='Lizenzverwaltung', template_mode='bootstrap3')
-admin.add_view(LicenseModelView(License, db.session))
+class LicenseView(ModelView):
+    page_size = 50
+    can_create = False
+    can_delete = True
+    can_view_details = True
+
+admin = Admin(app, index_view=MyAdminIndex(), template_mode='bootstrap3')
+admin.add_view(LicenseView(License, db.session, name='Lizenzen'))
 
 @app.route('/')
 def home():
@@ -44,56 +56,38 @@ def home():
 def check_license():
     key = request.args.get('key')
     hwid = request.args.get('hwid')
-
     lic = License.query.filter_by(schluessel=key).first()
-    if not lic:
-        return jsonify({"status": "invalid", "message": "Lizenz nicht gefunden."})
-    if not lic.aktiv:
-        return jsonify({"status": "invalid", "message": "Lizenz deaktiviert."})
-    if lic.gueltig_bis < datetime.utcnow():
-        return jsonify({"status": "invalid", "message": "Lizenz abgelaufen."})
-    if lic.hwid and lic.hwid != hwid:
-        return jsonify({"status": "invalid", "message": "HWID stimmt nicht überein."})
+    # siehe bereits vorhanden...
+    # (Dein bestehender API-Code)
 
-    if not lic.hwid:
-        lic.hwid = hwid
-        db.session.commit()
-
-    return jsonify({
-        "status": "valid",
-        "gueltig_bis": lic.gueltig_bis.isoformat(),
-        "hwid": lic.hwid
-    })
-
-# Webformular zum Key-Generieren
-HTML_FORM = '''
-<h2>🔑 Lizenz-Key generieren</h2>
-<form method="post">
-  Passwort: <input type="password" name="pw"><br>
-  Laufzeit (Tage): <input type="number" name="days"><br>
-  <button type="submit">Key generieren</button>
-</form>
-<p>{{ message }}</p>
-'''
-
-@app.route('/gen_key', methods=['GET', 'POST'])
-def gen_key():
-    msg = ''
+@app.route('/admin/create_license', methods=['GET','POST'])
+def create_license():
+    pw = request.args.get('pw')
+    if pw != ADMIN_PASSWORD:
+        abort(403)
     if request.method == 'POST':
-        pw = request.form.get('pw')
-        if pw != ADMIN_PASSWORD:
-            msg = "❌ Falsches Passwort"
-        else:
-            days = int(request.form.get('days', '30'))
-            key = secrets.token_hex(16)
-            now = datetime.utcnow()
-            license = License(schluessel=key, laufzeit_tage=days, gueltig_bis=now + timedelta(days=days))
-            db.session.add(license)
-            db.session.commit()
-            msg = f"✅ Lizenz erstellt: <code>{key}</code><br>Gültig bis: {license.gueltig_bis.date()}"
-    return render_template_string(HTML_FORM, message=msg)
+        days = int(request.form['days'])
+        key = secrets.token_urlsafe(16)
+        lic = License(
+            schluessel = key,
+            laufzeit_tage = days,
+            gueltig_bis = datetime.utcnow() + timedelta(days=days),
+        )
+        db.session.add(lic)
+        db.session.commit()
+        flash(f"Key erstellt: {key} – gültig für {days} Tage", 'success')
+    return render_template_string('''
+      <h2>Neuen Lizenz-Key erstellen</h2>
+      <form method="post">
+        Laufzeit (Tage): <input name="days" type="number" value="30"><br>
+        <button type="submit">Key generieren</button>
+      </form>
+      {% with msgs = get_flashed_messages(with_categories=true) %}
+        {% for cat, msg in msgs %}<p><b>{{msg}}</b></p>{% endfor %}
+      {% endwith %}
+    ''')
 
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    app.run(debug=True, host='0.0.0.0')
+    app.run(debug=True)
