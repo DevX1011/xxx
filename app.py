@@ -2,13 +2,17 @@ from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_admin import Admin
 from flask_admin.contrib.sqla import ModelView
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
 
 # === App-Konfiguration
+from dotenv import load_dotenv
+load_dotenv()  # liest .env
+
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://license_db_w975_user:eTkM91MxrmhIUg2TksJSucdDKRi5yjdK@dpg-d1i20gbuibrs73cjbocg-a.oregon-postgres.render.com/license_db_w975'
-app.config['SECRET_KEY'] = 'supersecret'
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'change_me')
 db = SQLAlchemy(app)
 
 # === Datenbankmodell
@@ -32,7 +36,7 @@ class LicenseModelView(ModelView):
 admin = Admin(app, name='Lizenzverwaltung', template_mode='bootstrap3')
 admin.add_view(LicenseModelView(License, db.session))
 
-# === API-Endpunkt zur Lizenzprüfung
+# === Lizenzprüfungs-API
 @app.route('/api/check_license')
 def check_license():
     key = request.args.get('key')
@@ -48,7 +52,6 @@ def check_license():
     if lic.hwid and lic.hwid != hwid:
         return jsonify({"status": "invalid", "message": "HWID stimmt nicht überein."})
 
-    # HWID registrieren, wenn leer
     if not lic.hwid:
         lic.hwid = hwid
         db.session.commit()
@@ -59,7 +62,7 @@ def check_license():
         "hwid": lic.hwid
     })
 
-# === Initialisieren & Starten
+# === Init & Start
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
