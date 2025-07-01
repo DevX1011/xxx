@@ -72,3 +72,43 @@ if __name__ == '__main__':
 @app.route('/')
 def home():
     return '🔐 Lizenzserver läuft – API erreichbar!', 200
+
+from flask import render_template_string
+
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "test123")  # .env setzen!
+
+html_form = """
+<!doctype html>
+<title>Key Generator</title>
+<h2>🔐 Lizenz-Key erstellen</h2>
+<form method=post>
+  Admin-Passwort: <input type=password name=password><br><br>
+  Laufzeit (Tage): <input type=number name=days value=30><br><br>
+  <input type=submit value="Lizenz erstellen">
+</form>
+{% if result %}
+  <p><strong>✅ Neuer Key:</strong> {{ result }}</p>
+{% endif %}
+"""
+
+@app.route('/generate', methods=['GET', 'POST'])
+def generate_license():
+    result = None
+    if request.method == 'POST':
+        if request.form.get("password") != ADMIN_PASSWORD:
+            return "❌ Falsches Passwort", 403
+        try:
+            days = int(request.form.get("days", 30))
+            key = secrets.token_hex(16)
+            gueltig_bis = datetime.utcnow() + timedelta(days=days)
+            lic = License(
+                schluessel=key,
+                laufzeit_tage=days,
+                gueltig_bis=gueltig_bis
+            )
+            db.session.add(lic)
+            db.session.commit()
+            result = key
+        except Exception as e:
+            return f"Fehler: {str(e)}", 500
+    return render_template_string(html_form, result=result)
