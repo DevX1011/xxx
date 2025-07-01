@@ -2,5 +2,6 @@ Flask==3.1.1
 Flask-Admin==1.6.1
 Flask-SQLAlchemy==3.1.1
 WTForms==2.3.3
-psycopg2-binary==2.9.9
-python-dotenv==1.0.0
+gunicorn
+psycopg2-binary
+python-dotenv
